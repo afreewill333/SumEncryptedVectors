@@ -8,7 +8,7 @@
 #include <omp.h>
 #include <paillier.h>
 
-#define VEC_SIZE 100
+#define VEC_SIZE 1000
 
 // Simple class to measure time for each method
 class Timer
@@ -31,6 +31,8 @@ private:
 
 void noPackingSum(long u[], long v[], long result[], FHESecKey sk, FHEPubKey pk)
 {
+    Timer tNoPackingEncryption;
+    tNoPackingEncryption.start();
     // Vectors to hold the ciphertexts created from the elements of u and v
     std::vector<Ctxt> encU(VEC_SIZE, Ctxt(pk));
     std::vector<Ctxt> encV(VEC_SIZE, Ctxt(pk));
@@ -41,21 +43,27 @@ void noPackingSum(long u[], long v[], long result[], FHESecKey sk, FHEPubKey pk)
 	Ctxt tempU(pk);
 	pk.Encrypt(tempU, to_ZZX(u[i]));
 	encU[i] = tempU;
-	// encU.push_back(tempU);
 
 	Ctxt tempV(pk);
 	pk.Encrypt(tempV, to_ZZX(v[i]));
 	encV[i] = tempV;
-	// encV.push_back(tempV);
     }
+    tNoPackingEncryption.stop();
+    std::cout << "HElib No packing encryption: " << tNoPackingEncryption.elapsed_time() << "s." <<  std::endl;
 
+    Timer tNoPackingSum;
+    tNoPackingSum.start();
     // Sum vectors element wise
     // The sum is stored in U
     #pragma omp parallel for
     for (int i = 0; i < VEC_SIZE; i++) {
 	encU[i] += encV[i];
     }
+    tNoPackingSum.stop();
+    std::cout << "HElib No packing sum: " << tNoPackingSum.elapsed_time() << "s." <<  std::endl;
 
+    Timer tNoPackingDecryption;
+    tNoPackingDecryption.start();
     // Decrypt result
     #pragma omp parallel for
     for (int i = 0; i < VEC_SIZE; i++) {
@@ -63,10 +71,14 @@ void noPackingSum(long u[], long v[], long result[], FHESecKey sk, FHEPubKey pk)
 	sk.Decrypt(element, encU[i]);
 	result[i] = conv<long>(element[0]);
     }
+    tNoPackingDecryption.stop();
+    std::cout << "HElib No packing decryption: " << tNoPackingDecryption.elapsed_time() << "s." <<  std::endl;
 }
 
 void packingPolySum(long u[], long v[], long result[], FHESecKey sk, FHEPubKey pk)
 {
+    Timer tPackingPolyEncryption;
+    tPackingPolyEncryption.start();
     // ZZX is a class for polynomials from the NTL library
     ZZX U, V;                               
 
@@ -86,11 +98,19 @@ void packingPolySum(long u[], long v[], long result[], FHESecKey sk, FHEPubKey p
 
     // Encrypt the polynomials into the ciphertexts
     pk.Encrypt(encU, U);
-    pk.Encrypt(encV, V);	
+    pk.Encrypt(encV, V);
+    tPackingPolyEncryption.stop();
+    std::cout << "HElib poly packing encryption: " << tPackingPolyEncryption.elapsed_time() << "s." <<  std::endl;
 
+    Timer tPackingPolySum;
+    tPackingPolySum.start();
     // Multiply the ciphertexts and store the result into encU
     encU += encV;
+    tPackingPolySum.stop();
+    std::cout << "HElib poly packing sum: " << tPackingPolySum.elapsed_time() << "s." <<  std::endl;    
 
+    Timer tPackingPolyDecryption;
+    tPackingPolyDecryption.start();
     // Decrypt the multiplied ciphertext into a polynomial using the secret key sk
     ZZX resultPoly;
     sk.Decrypt(resultPoly, encU);
@@ -100,10 +120,14 @@ void packingPolySum(long u[], long v[], long result[], FHESecKey sk, FHEPubKey p
     for (int i = 0; i < VEC_SIZE; i++) {
 	result[i] = conv<long>(resultPoly[i]);
     }
+    tPackingPolyDecryption.stop();
+    std::cout << "HElib poly packing decryption: " << tPackingPolyDecryption.elapsed_time() << "s." <<  std::endl;
 }
 
 void packingSubfieldSum(long u[], long v[], long result[], FHEPubKey pk, FHESecKey sk, FHEcontext& context)
 {
+    Timer tPackingSubfieldEncryption;
+    tPackingSubfieldEncryption.start();
     // Creates a helper object based on the context
     EncryptedArray ea(context, context.alMod.getFactorsOverZZ()[0]); 
 
@@ -123,23 +147,35 @@ void packingSubfieldSum(long u[], long v[], long result[], FHEPubKey pk, FHESecK
     // Encrypt the whole vector into one ciphertext using packing
     ea.encrypt(encU, pk, U);
     ea.encrypt(encV, pk, V);
+    tPackingSubfieldEncryption.stop();
+    std::cout << "HElib subfield packing encryption: " << tPackingSubfieldEncryption.elapsed_time() << "s." <<  std::endl;    
 
+    Timer tPackingSubfieldSum;
+    tPackingSubfieldSum.start();
     // Sum ciphertexts and set the result to encU
     encU += encV;
+    tPackingSubfieldSum.stop();
+    std::cout << "HElib subfield packing sum: " << tPackingSubfieldSum.elapsed_time() << "s." <<  std::endl;        
 
+    Timer tPackingSubfieldDecryption;
+    tPackingSubfieldDecryption.start();
     // Decrypt the result
     std::vector<long> res(ea.size(), 0);
-    ea.decrypt(encU, sk, res);
+    ea.decrypt(encU, sk, res);   
 
     // Assign the values of the polynomial's coefficients to the result vector
     #pragma omp parallel for
     for (int i = 0; i < VEC_SIZE; i++) {
 	result[i] = conv<long>(res[i]);
-    }    
+    }
+    tPackingSubfieldDecryption.stop();
+    std::cout << "HElib subfield packing decryption: " << tPackingSubfieldDecryption.elapsed_time() << "s." <<  std::endl;            
 }
 
 void paillierSum(long u[], long v[], long result[], paillier_pubkey_t* pubKey, paillier_prvkey_t* secKey)
 {
+    Timer tPaillierEncryption;
+    tPaillierEncryption.start();
     // Vectors that will hold the ciphertexts
     std::vector<paillier_ciphertext_t*> encU(VEC_SIZE);
     std::vector<paillier_ciphertext_t*> encV(VEC_SIZE);    
@@ -159,7 +195,11 @@ void paillierSum(long u[], long v[], long result[], paillier_pubkey_t* pubKey, p
 	paillier_freeplaintext(ptxtU);		
 	paillier_freeplaintext(ptxtV);	
     }
-    
+    tPaillierEncryption.stop();
+    std::cout << "Paillier encryption: " << tPaillierEncryption.elapsed_time() << "s." <<  std::endl;                
+
+    Timer tPaillierSum;
+    tPaillierSum.start();
     // Sum encrypted vectors element wise
     #pragma omp parallel for
     for (int i = 0; i < VEC_SIZE; i++) {
@@ -168,7 +208,11 @@ void paillierSum(long u[], long v[], long result[], paillier_pubkey_t* pubKey, p
 	paillier_freeciphertext(encU[i]);
 	encU[i] = encryptedSum;
     }
+    tPaillierSum.stop();
+    std::cout << "Paillier sum: " << tPaillierSum.elapsed_time() << "s." <<  std::endl;                
 
+    Timer tPaillierDecryption;
+    tPaillierDecryption.start();
     // Decrypt the result
     #pragma omp parallel for
     for (int i = 0; i < VEC_SIZE; i++) {
@@ -180,6 +224,8 @@ void paillierSum(long u[], long v[], long result[], paillier_pubkey_t* pubKey, p
 	paillier_freeciphertext(encV[i]);
 	paillier_freeplaintext(dec);	
     }
+    tPaillierDecryption.stop();
+    std::cout << "Paillier decryption: " << tPaillierDecryption.elapsed_time() << "s." <<  std::endl;                
 }
 
 int main(int argc, char **argv)
@@ -254,6 +300,8 @@ int main(int argc, char **argv)
     Timer tMethod4;
     tMethod4.start();
 
+    Timer tPaillierInitialization;
+    tPaillierInitialization.start();
     // Security parameter (number of bits of the modulus)
     const long n = 256;   
     
@@ -261,6 +309,8 @@ int main(int argc, char **argv)
     paillier_pubkey_t* pubKey;
     paillier_prvkey_t* secKey;
     paillier_keygen(n, &pubKey, &secKey, paillier_get_rand_devurandom);
+    tPaillierInitialization.stop();
+    std::cout << "Paillier initialization: " << tPaillierInitialization.elapsed_time() << "s." <<  std::endl;    
     
     paillierSum(u, v, result, pubKey, secKey);
 
